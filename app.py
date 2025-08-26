@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_mail import Mail, Message
+from flask_cors import CORS
 from dotenv import load_dotenv
 import uuid
 import os
@@ -7,6 +8,7 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})  
 
 # Configure Flask-Mail
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
@@ -106,7 +108,6 @@ def book_service():
 
 
 # ----------------------- Contact Functions (unchanged) -----------------------
-
 @app.route('/api/contact', methods=['POST'])
 def contact_us():
     data = request.get_json() or request.form.to_dict()
@@ -120,6 +121,7 @@ New Contact Message Received:
 Full Name: {data.get('name')}
 Email: {data.get('email')}
 Phone Number: {data.get('phone')}
+Preferred Contact Method: {data.get('preferredContact')}
 Subject: {data.get('subject')}
 Message:
 {data.get('message')}
@@ -142,8 +144,9 @@ We have received your message and will get back to you shortly.
 Here’s a summary of your message:
 - Subject: {data.get('subject')}
 - Message: {data.get('message')}
+- Preferred Contact Method: {data.get('preferredContact')}
 
-If you need to speak to us urgently, call us directly at 0726507488 or 0751433086.
+If you need to speak to us urgently, call us directly at +254 710 302 253.
 
 Best regards,  
 Bristo Event Caterers Team
