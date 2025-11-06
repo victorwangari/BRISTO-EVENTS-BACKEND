@@ -77,19 +77,40 @@ def format_booking_email(data, booking_id):
         event_type = data.get("customEventType", "Other")
 
     return f"""
-New Booking Received:
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; background-color: #f9f9f9; padding: 20px;">
+        <div style="max-width: 600px; margin: auto; background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <h2 style="color: #b22222; text-align:center;">🎉 New Booking Received</h2>
+            <hr style="border: none; height: 2px; background-color: #b22222; width: 80px; margin: 10px auto 20px auto;">
+            
+            <p><strong>Booking ID:</strong> {booking_id}</p>
+            <p><strong>Name:</strong> {data.get('name')}</p>
+            <p><strong>Phone:</strong> <a href="tel:{data.get('phone')}" style="color:#b22222; text-decoration:none;">{data.get('phone')}</a></p>
+            <p><strong>Email:</strong> <a href="mailto:{data.get('email')}" style="color:#b22222; text-decoration:none;">{data.get('email')}</a></p>
 
-Booking ID: {booking_id}
-Name: {data.get('name')}
-Phone: {data.get('phone')}
-Email: {data.get('email')}
-Event Type: {event_type}
-Event Date: {data.get('eventDate')}
-Guests: {data.get('guests')}
-Venue Location: {data.get('venueLocation')}
-Budget: {data.get('budget')}
-Special Requests: {data.get('specialRequests')}
-"""
+            <h3 style="color:#b22222; margin-top:25px;">Booking Details</h3>
+            <table style="width:100%; border-collapse: collapse;">
+                <tr><td style="padding:8px; border-bottom:1px solid #eee;"><strong>Event Type:</strong></td><td>{event_type}</td></tr>
+                <tr><td style="padding:8px; border-bottom:1px solid #eee;"><strong>Event Date:</strong></td><td>{data.get('eventDate')}</td></tr>
+                <tr><td style="padding:8px; border-bottom:1px solid #eee;"><strong>Guests:</strong></td><td>{data.get('guests')}</td></tr>
+                <tr><td style="padding:8px; border-bottom:1px solid #eee;"><strong>Venue Location:</strong></td><td>{data.get('venueLocation')}</td></tr>
+                <tr><td style="padding:8px; border-bottom:1px solid #eee;"><strong>Budget:</strong></td><td>{data.get('budget')}</td></tr>
+                <tr><td style="padding:8px;"><strong>Special Requests:</strong></td><td>{data.get('specialRequests')}</td></tr>
+            </table>
+
+            <p style="margin-top:25px;">📞 <strong>Need to reach the client quickly?</strong><br>
+            Call them directly at <a href="tel:{data.get('phone')}" style="color:#b22222; font-weight:bold;">{data.get('phone')}</a>.</p>
+
+            <hr style="margin:25px 0; border:none; border-top:1px solid #eee;">
+            <p style="font-size:13px; color:#888; text-align:center;">
+                Bristo Event Caterers | <a href="tel:+254710302253" style="color:#b22222;">+254 710 302 253</a><br>
+                <a href="https://www.bristoevents.co.ke" style="color:#b22222;">www.bristoevents.co.ke</a>
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
 
 def format_confirmation_email(data, booking_id):
     event_type = data.get("eventType")
