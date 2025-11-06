@@ -1,31 +1,77 @@
 from flask import Flask, request, jsonify
-from flask_mail import Mail, Message
 from flask_cors import CORS
 from dotenv import load_dotenv
 import uuid
 import os
+import requests
+import json
 
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# Configure Flask-Mail
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get('EMAIL_USER')
-app.config['MAIL_PASSWORD'] = os.environ.get('EMAIL_PASS')
-app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
+# -------------------- ZOHO MAIL API CONFIG --------------------
+ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID")
+ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET")
+ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN")
+BUSINESS_EMAIL = "bristoeventcaterers@bristoevents.co.ke"
+ZOHO_API_BASE = "https://mail.zoho.com/api/accounts"
 
-mail = Mail(app)
+def get_access_token():
+    """Fetch a short-lived access token using refresh token."""
+    url = "https://accounts.zoho.com/oauth/v2/token"
+    data = {
+        "refresh_token": ZOHO_REFRESH_TOKEN,
+        "client_id": ZOHO_CLIENT_ID,
+        "client_secret": ZOHO_CLIENT_SECRET,
+        "grant_type": "refresh_token"
+    }
+    res = requests.post(url, data=data)
+    res.raise_for_status()
+    token_data = res.json()
+    return token_data.get("access_token")
 
-BUSINESS_EMAIL = 'bristoeventcaterers@gmail.com'  # your business email
+def get_primary_account_id(token):
+    """Fetch the user's primary Zoho Mail account ID."""
+    url = ZOHO_API_BASE
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    accounts = response.json().get("data", [])
+    if not accounts:
+        raise Exception("No Zoho Mail accounts found.")
+    # Usually the first account is the primary
+    return accounts[0].get("accountId")
+
+def send_email_via_zoho(to_email, subject, content):
+    """Send email using Zoho Mail API."""
+    token = get_access_token()
+    account_id = get_primary_account_id(token)  # You already have this helper
+
+    url = f"{ZOHO_API_BASE}/{account_id}/messages"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Content-Type": "application/json"
+    }
+
+    # ✅ Here’s the important part:
+    data = {
+        "fromAddress": BUSINESS_EMAIL,
+        "toAddress": to_email,
+        "subject": subject,
+        "mailFormat": "html",   # tells Zoho to render it as HTML
+        "content": content      # directly pass HTML text (NOT nested in JSON)
+    }
+
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    if response.status_code != 200:
+        print("Zoho Mail API error:", response.text)
+    return response.json()
+
 
 # ----------------------- Booking Functions -----------------------
-
 def format_booking_email(data, booking_id):
-    # if eventType == "other", use customEventType
     event_type = data.get("eventType")
     if event_type == "other":
         event_type = data.get("customEventType", "Other")
@@ -45,120 +91,152 @@ Budget: {data.get('budget')}
 Special Requests: {data.get('specialRequests')}
 """
 
-
 def format_confirmation_email(data, booking_id):
     event_type = data.get("eventType")
     if event_type == "other":
         event_type = data.get("customEventType", "Other")
 
     return f"""
-Hi {data.get('name')},
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: #b22222;">Booking Confirmation - Bristo Event Caterers</h2>
 
-Thank you for booking with Bristo Event Caterers.
+        <p>Hi <strong>{data.get('name')}</strong>,</p>
 
-Your Booking ID is {booking_id}.
+        <p>Thank you for booking with <strong>Bristo Event Caterers</strong>.</p>
 
-Here are your booking details:
-- Event Type: {event_type}
-- Event Date: {data.get('eventDate')}
-- Guests: {data.get('guests')}
-- Venue Location: {data.get('venueLocation')}
-- Budget: {data.get('budget')}
-- Special Requests: {data.get('specialRequests')}
+        <p>Your Booking ID is <strong>{booking_id}</strong>.</p>
 
-Our team will contact you shortly to confirm the booking and schedule.
+        <h3>Here are your booking details:</h3>
+        <ul>
+            <li><strong>Event Type:</strong> {event_type}</li>
+            <li><strong>Event Date:</strong> {data.get('eventDate')}</li>
+            <li><strong>Guests:</strong> {data.get('guests')}</li>
+            <li><strong>Venue Location:</strong> {data.get('venueLocation')}</li>
+            <li><strong>Budget:</strong> {data.get('budget')}</li>
+            <li><strong>Special Requests:</strong> {data.get('specialRequests')}</li>
+        </ul>
 
-Best regards,  
-Bristo Event Caterers Team
-"""
+        <p>Our team will contact you shortly to confirm your booking.</p>
+        <p>If you need urgent assistance, please call us directly at 
+        <a href="tel:+254710302253" style="color:#b22222; text-decoration:none; font-weight:bold;">+254 710 302 253</a>.</p>
+
+        <p>Best regards,<br>
+        <strong>Bristo Event Caterers Team</strong></p>
+    </body>
+    </html>
+    """
 
 
-@app.route('/api/book', methods=['POST'])
+@app.route("/api/book", methods=["POST"])
 def book_service():
-    # works for both form-data and JSON
     data = request.get_json() or request.form.to_dict()
     try:
         booking_id = "BK" + str(uuid.uuid4())[:8].upper()
 
-        # Send to business email
-        msg_to_business = Message(
-            subject=f"New Booking from {data.get('name')} (ID: {booking_id})",
-            recipients=[BUSINESS_EMAIL],
-            body=format_booking_email(data, booking_id)
+        # Send to business
+        send_email_via_zoho(
+            BUSINESS_EMAIL,
+            f"New Booking from {data.get('name')} (ID: {booking_id})",
+            format_booking_email(data, booking_id)
         )
-        mail.send(msg_to_business)
 
-        # Confirmation to user
-        user_email = data.get('email')
+        # Send confirmation to client
+        user_email = data.get("email")
         if user_email:
-            msg_to_user = Message(
-                subject="Booking Confirmation - Bristo Event Caterers",
-                recipients=[user_email],
-                body=format_confirmation_email(data, booking_id)
+            send_email_via_zoho(
+                user_email,
+                "Booking Confirmation - Bristo Event Caterers",
+                format_confirmation_email(data, booking_id)
             )
-            mail.send(msg_to_user)
 
-        return jsonify({
-            "message": "Booking received and emails sent",
-            "booking_id": booking_id
-        }), 200
+        return jsonify({"message": "Booking received and emails sent", "booking_id": booking_id}), 200
 
     except Exception as e:
+        print("Booking Error:", e)
         return jsonify({"error": str(e)}), 500
 
+# ----------------------- Contact Functions -----------------------
+# ----------------------- Contact Functions -----------------------
 
-# ----------------------- Contact Functions (unchanged) -----------------------
-@app.route('/api/contact', methods=['POST'])
+def format_contact_email(data):
+    """HTML email sent to the business inbox."""
+    return f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: #b22222;">New Contact Form Message</h2>
+
+        <p><strong>Full Name:</strong> {data.get('name')}</p>
+        <p><strong>Email:</strong> {data.get('email')}</p>
+        <p><strong>Phone Number:</strong> {data.get('phone')}</p>
+        <p><strong>Preferred Contact Method:</strong> {data.get('preferredContact')}</p>
+        <p><strong>Subject:</strong> {data.get('subject')}</p>
+        <p><strong>Message:</strong><br>{data.get('message')}</p>
+
+        <hr>
+        <p style="font-size: 14px; color: #777;">
+            Sent via the Bristo Event Caterers website contact form.
+        </p>
+    </body>
+    </html>
+    """
+
+
+def format_contact_confirmation_email(data):
+    """HTML confirmation email sent to the client."""
+    return f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+        <h2 style="color: #b22222;">We Received Your Message - Bristo Event Caterers</h2>
+
+        <p>Hi <strong>{data.get('name')}</strong>,</p>
+
+        <p>Thank you for reaching out to <strong>Bristo Event Caterers</strong>.</p>
+        <p>We’ve received your message and will get back to you as soon as possible.</p>
+
+        <h3>Your Message Summary:</h3>
+        <ul>
+            <li><strong>Subject:</strong> {data.get('subject')}</li>
+            <li><strong>Preferred Contact Method:</strong> {data.get('preferredContact')}</li>
+            <li><strong>Message:</strong> {data.get('message')}</li>
+        </ul>
+
+        <p>If you need urgent assistance, please call us directly at 
+        <a href="tel:+254710302253" style="color:#b22222; text-decoration:none; font-weight:bold;">+254 710 302 253</a>.</p>
+
+        <p>Best regards,<br>
+        <strong>Bristo Event Caterers Team</strong></p>
+    </body>
+    </html>
+    """
+
+
+@app.route("/api/contact", methods=["POST"])
 def contact_us():
     data = request.get_json() or request.form.to_dict()
     try:
-        msg_to_business = Message(
-            subject=f"Contact Form Message - {data.get('subject')}",
-            recipients=[BUSINESS_EMAIL],
-            body=f"""
-New Contact Message Received:
-
-Full Name: {data.get('name')}
-Email: {data.get('email')}
-Phone Number: {data.get('phone')}
-Preferred Contact Method: {data.get('preferredContact')}
-Subject: {data.get('subject')}
-Message:
-{data.get('message')}
-"""
+        # Send message to business
+        send_email_via_zoho(
+            BUSINESS_EMAIL,
+            f"Contact Form Message - {data.get('subject')}",
+            format_contact_email(data)
         )
-        mail.send(msg_to_business)
 
-        user_email = data.get('email')
+        # Send confirmation to client
+        user_email = data.get("email")
         if user_email:
-            msg_to_user = Message(
-                subject="We Received Your Message - Bristo Event Caterers",
-                recipients=[user_email],
-                body=f"""
-Hi {data.get('name')},
-
-Thank you for reaching out to Bristo Event Caterers. 
-
-We have received your message and will get back to you shortly.
-
-Here’s a summary of your message:
-- Subject: {data.get('subject')}
-- Message: {data.get('message')}
-- Preferred Contact Method: {data.get('preferredContact')}
-
-If you need to speak to us urgently, call us directly at +254 710 302 253.
-
-Best regards,  
-Bristo Event Caterers Team
-"""
+            send_email_via_zoho(
+                user_email,
+                "We Received Your Message - Bristo Event Caterers",
+                format_contact_confirmation_email(data)
             )
-            mail.send(msg_to_user)
 
         return jsonify({"message": "Message sent successfully"}), 200
 
     except Exception as e:
+        print("Contact Error:", e)
         return jsonify({"error": str(e)}), 500
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
